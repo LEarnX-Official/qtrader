@@ -85,7 +85,6 @@ class X402Payer:
             "--max-payment", str(cap),
             "--prefer-network", self.network,
             "--prefer-method", "eip3009",
-            "--password", WALLET_PASSWORD,
             "--yes",
         ]
         if method and method.upper() != "GET":
@@ -93,8 +92,15 @@ class X402Payer:
         if body:
             cmd += ["--body", body]
 
+        # Pass the wallet password via env (TWAK_WALLET_PASSWORD), never on the
+        # command line — keeps it out of the process arg list (ps aux).
+        import os
+        env = os.environ.copy()
+        env["TWAK_WALLET_PASSWORD"] = WALLET_PASSWORD
+
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=90, env=env)
             out  = (proc.stdout or "").strip()
             ok   = proc.returncode == 0 and "402" not in out.split("\n")[0]
             tx   = ""

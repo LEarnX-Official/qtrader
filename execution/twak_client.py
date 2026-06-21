@@ -215,9 +215,12 @@ class TWAKClient:
         """Run a TWAK CLI command. Returns {success, output, error}."""
         try:
             env = os.environ.copy()
-            env["TWAK_API_KEY"]      = TWAK_API_KEY
-            env["TWAK_WALLET_PASS"]  = WALLET_PASSWORD
-            env["TWAK_WALLET"]       = AGENT_WALLET_ADDRESS
+            env["TWAK_API_KEY"]          = TWAK_API_KEY
+            # TWAK reads the wallet password from TWAK_WALLET_PASSWORD (per CLI
+            # help). Passing it via env keeps it OUT of the process arg list
+            # (ps aux), unlike a --password flag.
+            env["TWAK_WALLET_PASSWORD"]  = WALLET_PASSWORD
+            env["TWAK_WALLET"]           = AGENT_WALLET_ADDRESS
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
@@ -252,7 +255,6 @@ class TWAKClient:
                 endpoint,
                 "--amount",   str(amount_usd),
                 "--currency", "USDC",
-                "--password", WALLET_PASSWORD,
                 "--json",
             ], timeout=30)
 
@@ -328,9 +330,8 @@ class TWAKClient:
             to_token,
             "--chain",    "bsc",
             "--slippage", slippage_pct,
-            "--password", WALLET_PASSWORD,
             "--json",
-        ], timeout=90)
+        ], timeout=90)  # password supplied via TWAK_WALLET_PASSWORD env (not argv)
 
         if result["success"]:
             try:
@@ -377,7 +378,6 @@ class TWAKClient:
 
         result = self._twak_cmd([
             "twak", "compete", "register",
-            "--password", WALLET_PASSWORD,
             "--json",
         ], timeout=60)
 
