@@ -40,6 +40,39 @@ TRADE_TOKENS    = ["BNB", "SOL", "ETH", "XRP", "INJ", "DOGE", "LTC"]
 ELIGIBLE_TOKENS = ["ETH", "XRP", "INJ", "DOGE", "LTC"]   # competition-eligible
 INELIGIBLE      = ["BNB", "SOL"]                          # not on official list
 RESULTS_DIR     = BASE_DIR / "results"
+
+
+def _detect_baseline_capital(default: float = 100.0) -> float:
+    """
+    Auto-detect the starting capital baseline.
+
+    Live: read the real on-chain BSC balance via TWAK (stablecoins 1:1,
+    other tokens at live price). Paper or any failure: fall back to default.
+    Read once at monitor startup so equity %/drawdown track the real wallet.
+    """
+    try:
+        from config import DRY_RUN
+        if DRY_RUN:
+            return default
+        from execution.twak_client import TWAKClient
+        bal = TWAKClient().get_wallet_balance(chain="bsc")
+        if "error" in bal:
+            return default
+        prices = fetch_prices()
+        total = 0.0
+        for tok in bal.get("tokens", []):
+            sym = tok.get("symbol", "").upper()
+            amt = float(tok.get("balance", 0) or 0)
+            if sym in ("USDC", "USDT", "USD1", "FDUSD", "DAI"):
+                total += amt
+            elif sym in prices and prices[sym].get("price", 0) > 0:
+                total += amt * prices[sym]["price"]
+        return total if total > 0 else default
+    except Exception:
+        return default
+
+
+# Assigned after fetch_prices() is defined (see below) so token valuation works.
 INITIAL_CAP     = 100.0
 
 # ── Data ──────────────────────────────────────────────────────────────────────
@@ -81,6 +114,10 @@ def fetch_prices() -> dict:
     _price_cache["ts"]   = time.time()
     _price_cache["data"] = prices
     return prices
+
+
+# Now that fetch_prices() exists, resolve the real baseline (live = on-chain).
+INITIAL_CAP     = _detect_baseline_capital()
 
 
 def get_stats(df: pd.DataFrame) -> dict:
@@ -317,5 +354,18 @@ def run_monitor(interval=15):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--interval", type=int, default=15)
+    p.add_argument("--live", action="store_true",
+                   help="Force real on-chain balance as baseline (use when "
+                        "the agent runs with --dry-run false)")
     a = p.parse_args()
+
+    # The monitor is a separate process and can't see the agent's --dry-run
+    # override, so --live tells it to detect the real on-chain balance.
+    if a.live:
+        import config
+        config.DRY_RUN = False
+        INITIAL_CAP = _detect_baseline_capital()
+        console.print(f"[dim]Live mode — baseline from on-chain balance: "
+                      f"${INITIAL_CAP:,.2f}[/]")
+
     run_monitor(a.interval)
