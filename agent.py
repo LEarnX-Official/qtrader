@@ -365,15 +365,31 @@ def main():
                         help="Override DRY_RUN: 'true' or 'false'")
     args = parser.parse_args()
 
-    # Override DRY_RUN
+    # Override DRY_RUN — must propagate to EVERY module, not just config.
+    # Modules do `from config import DRY_RUN`, which copies the value at import
+    # time; mutating only config.DRY_RUN would leave stale copies and produce a
+    # dangerous mismatch (banner says PAPER while execution runs LIVE). So we
+    # patch the symbol in config AND in every already-imported module that has
+    # its own DRY_RUN binding.
+    global DRY_RUN
+    import config
     if args.dry_run is not None:
-        import config
-        config.DRY_RUN = args.dry_run.lower() == "true"
-        print(f"[Agent] DRY_RUN = {config.DRY_RUN}")
+        new_val = args.dry_run.lower() == "true"
+        config.DRY_RUN = new_val
+        DRY_RUN = new_val
+        for _modname, _mod in list(sys.modules.items()):
+            if _mod is not None and hasattr(_mod, "DRY_RUN") and _mod is not config:
+                try:
+                    setattr(_mod, "DRY_RUN", new_val)
+                except Exception:
+                    pass
+        print(f"[Agent] DRY_RUN override = {new_val}")
 
+    # Authoritative mode for display = config.DRY_RUN (single source of truth)
+    live = not config.DRY_RUN
     print("="*60)
-    print("QUANTUM TRADER — BNB Hack AI Trading Agent ⚡")
-    print(f"Mode   : {'📋 PAPER TRADE' if DRY_RUN else '🔴 LIVE TRADE'}")
+    print("qtrader — BNB Hack AI Trading Agent ⚡")
+    print(f"Mode   : {'🔴 LIVE TRADE' if live else '📋 PAPER TRADE'}")
     print(f"Wallet : {AGENT_WALLET_ADDRESS}")
     print(f"Capital: ${INITIAL_CAPITAL:,.0f}")
     print("="*60)
