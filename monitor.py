@@ -78,13 +78,30 @@ INITIAL_CAP     = 100.0
 # ── Data ──────────────────────────────────────────────────────────────────────
 
 def load_trades() -> pd.DataFrame:
+    """
+    Load the trade log, filtered to the CURRENT mode (live vs paper).
+
+    The log mixes paper rows (DRY_RUN=True, ~$100) and live rows
+    (DRY_RUN=False, real balance). Mixing them corrupts PnL/drawdown, so we
+    keep only rows matching the mode the monitor is running in.
+    """
     path = RESULTS_DIR / "trades_live.csv"
     if not path.exists():
         return pd.DataFrame()
     try:
         df = pd.read_csv(path)
         df["datetime"] = pd.to_datetime(df["datetime"], format="mixed", utc=True)
-        return df.sort_values("datetime").reset_index(drop=True)
+        df = df.sort_values("datetime").reset_index(drop=True)
+        # Keep only rows for the current mode (LIVE shows live rows, etc.)
+        if "dry_run" in df.columns:
+            from config import DRY_RUN
+            want_dry = bool(DRY_RUN)
+            mask = df["dry_run"].astype(str).str.lower().isin(
+                ["true", "1"] if want_dry else ["false", "0"])
+            filtered = df[mask].reset_index(drop=True)
+            # Fall back to all rows if the current mode has no history yet.
+            return filtered if not filtered.empty else df
+        return df
     except Exception:
         return pd.DataFrame()
 
@@ -131,13 +148,19 @@ def get_stats(df: pd.DataFrame) -> dict:
     weights = {t: float(latest.get(f"w_{t}", 0.0)) for t in TRADE_TOKENS}
     x402    = float(df["x402_paid"].sum()) if "x402_paid" in df.columns else 0.0
 
-    caps = np.array([INITIAL_CAP] + df["capital"].tolist())
+    # Baseline = the first logged capital for this mode (the real starting
+    # point), not the global INITIAL_CAP — avoids paper/live baseline mismatch.
+    baseline = float(df["capital"].iloc[0]) if len(df) else INITIAL_CAP
+    if baseline <= 0:
+        baseline = INITIAL_CAP
+
+    caps = np.array([baseline] + df["capital"].tolist())
     rets = np.diff(caps) / caps[:-1]
     peaks = np.maximum.accumulate(caps)
     mdd  = float(((peaks - caps) / np.maximum(peaks, 1e-8)).max())
     sharpe = float(rets.mean() / rets.std() * np.sqrt(365 * 24)) if len(rets) > 1 and rets.std() > 1e-9 else 0.0
 
-    return {"capital": capital, "total_return": (capital - INITIAL_CAP) / INITIAL_CAP,
+    return {"capital": capital, "total_return": (capital - baseline) / baseline,
             "max_drawdown": mdd, "sharpe": sharpe, "n_trades": len(df),
             "cash_weight": float(latest.get("cash_weight", 1.0)), "weights": weights,
             "last_trade": pd.to_datetime(latest["datetime"]),
@@ -251,7 +274,10 @@ def equity_panel(df):
     if df.empty or len(df) < 2:
         return Panel("[dim]Equity curve after first trades...[/]",
                      title="[bold]Equity Curve[/]", border_style="yellow")
-    caps = [INITIAL_CAP] + df["capital"].tolist()
+    base = float(df["capital"].iloc[0])   # per-mode baseline (matches get_stats)
+    if base <= 0:
+        base = INITIAL_CAP
+    caps = [base] + df["capital"].tolist()
     W, H = 50, 6
     mn, mx = min(caps), max(caps); rng = max(mx-mn, 0.01)
     step = max(1, len(caps)//W); s = caps[::step][-W:]
@@ -260,12 +286,12 @@ def equity_panel(df):
         row = ""
         for v in s:
             y = int((v-mn)/rng*(H-1)); cr = H-1-y
-            by = int((INITIAL_CAP-mn)/rng*(H-1)); br = H-1-by
-            if cr == ri: row += "[green]█[/]" if v >= INITIAL_CAP else "[red]█[/]"
+            by = int((base-mn)/rng*(H-1)); br = H-1-by
+            if cr == ri: row += "[green]█[/]" if v >= base else "[red]█[/]"
             elif ri == br: row += "[dim]─[/]"
             else: row += " "
         rows.append(row)
-    tr = (caps[-1]-INITIAL_CAP)/INITIAL_CAP; rc = "green" if tr >= 0 else "red"
+    tr = (caps[-1]-base)/base; rc = "green" if tr >= 0 else "red"
     body = f"[dim]${mx:.2f}[/]\n" + "\n".join(rows) + f"\n[dim]${mn:.2f}[/]"
     return Panel(body, title=f"[bold]Equity[/] [{rc}]{tr:+.2%}[/] [dim]({len(df)}t)[/]",
                  border_style="yellow", padding=(0,1))
@@ -339,6 +365,27 @@ def render(interval):
 
 
 def run_monitor(interval=15):
+    # Only use the rich Live full-screen UI when attached to a real terminal.
+    # Piped / non-TTY (logs, tmux pipe, `timeout`) → fall back to plain prints
+    # so the monitor always shows output instead of a blank alt-screen.
+    if not sys.stdout.isatty():
+        print("[monitor] non-interactive terminal — plain refresh mode")
+        try:
+            while True:
+                df = load_trades()
+                stats = get_stats(df)
+                prices = fetch_prices()
+                print(f"\n[{datetime.datetime.now(UTC).strftime('%H:%M:%S')}] "
+                      f"Capital ${stats['capital']:.2f} | "
+                      f"Return {stats['total_return']:+.2%} | "
+                      f"MaxDD {stats['max_drawdown']:.2%} | "
+                      f"Trades {stats['n_trades']} | "
+                      f"Cash {stats['cash_weight']:.0%}", flush=True)
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n[monitor] stopped.")
+        return
+
     try:
         with Live(render(interval), console=console, refresh_per_second=1,
                   screen=True) as live:
