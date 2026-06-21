@@ -51,7 +51,7 @@ drawdown-capped competition.
 > 📩 **Want to talk about the full research stack** (the model architecture,
 > training methodology, and how the weights are produced)? That work is private,
 > but I'm happy to discuss it directly — **contact me at
-> ritwickhaldar2018@gmail.com**.
+> chanakyaa0.2.0@gmail.com**.
 
 ---
 
@@ -537,7 +537,7 @@ the weights are produced — is **private and not published here**.
 If you want to discuss the full research stack (judges, collaborators, or anyone
 curious about the methodology), reach out directly:
 
-**📩 ritwickhaldar2018@gmail.com**
+**📩 chanakyaa0.2.0@gmail.com**
 
 ---
 
