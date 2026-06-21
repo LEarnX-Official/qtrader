@@ -48,6 +48,63 @@ class TWAKTrader:
 
         if not self.dry_run:
             self._init_twak()
+            # LIVE: start from the REAL on-chain balance, not INITIAL_CAPITAL.
+            self.sync_real_balance()
+
+    def sync_real_balance(self) -> float:
+        """
+        Read the agent's real on-chain BSC balance via TWAK and set capital +
+        holdings from it. Used in LIVE mode so trade sizing, drawdown, and the
+        risk gate all track the actual wallet — not the hardcoded $100.
+
+        Returns the detected total capital in USD. On any failure it keeps the
+        existing capital and warns (never silently trades on a wrong number).
+        """
+        try:
+            from execution.twak_client import TWAKClient
+            bal = TWAKClient().get_wallet_balance(chain="bsc")
+            if "error" in bal:
+                print(f"[Trader] ⚠️  Could not read on-chain balance: {bal['error']} "
+                      f"— keeping capital=${self.capital:.2f}")
+                return self.capital
+
+            prices = self.get_current_prices()
+            holdings = {}
+            total_usd = 0.0
+
+            # Stablecoins count 1:1 USD; other tokens valued at live price.
+            for tok in bal.get("tokens", []):
+                sym = tok.get("symbol", "").upper()
+                amt = float(tok.get("balance", 0) or 0)
+                if amt <= 0:
+                    continue
+                if sym in ("USDC", "USDT", "USD1", "FDUSD", "DAI"):
+                    holdings[sym] = amt
+                    total_usd += amt
+                elif sym in prices and prices[sym] > 0:
+                    holdings[sym] = amt                      # token units
+                    total_usd += amt * prices[sym]
+
+            if BASE_CURRENCY not in holdings:
+                holdings[BASE_CURRENCY] = 0.0
+
+            if total_usd <= 0:
+                print(f"[Trader] ⚠️  On-chain balance reads $0 — keeping "
+                      f"capital=${self.capital:.2f}. Fund the wallet before live.")
+                return self.capital
+
+            self.holdings     = holdings
+            self.capital      = total_usd
+            self.peak_capital = total_usd
+            usdc = holdings.get(BASE_CURRENCY, 0.0)
+            print(f"[Trader] 💰 Live balance detected: ${total_usd:,.2f} "
+                  f"({BASE_CURRENCY}=${usdc:,.2f} + tokens)")
+            return total_usd
+
+        except Exception as e:
+            print(f"[Trader] ⚠️  Balance sync failed: {e} — keeping "
+                  f"capital=${self.capital:.2f}")
+            return self.capital
 
     def _init_twak(self):
         """Initialize TWAK connection for live trading."""

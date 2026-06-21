@@ -396,21 +396,31 @@ class TWAKClient:
 
     # ── Portfolio Check via TWAK ───────────────────────────────────────────────
 
-    def get_wallet_portfolio(self) -> Dict:
-        """Check current on-chain portfolio via TWAK."""
-        if self.dry_run:
-            return {"dry_run": True}
-
+    def get_wallet_balance(self, chain: str = "bsc") -> Dict:
+        """
+        Read the real on-chain wallet balance via TWAK.
+        Returns the parsed JSON: native coin + `tokens` array (symbol/balance).
+        """
         result = self._twak_cmd(
-            ["twak", "wallet", "portfolio", "--wallet", AGENT_WALLET_ADDRESS,
-             "--chain", "bsc"], timeout=30)
-
+            ["twak", "wallet", "balance", "--chain", chain, "--json"],
+            timeout=30)
         if result["success"]:
             try:
                 return json.loads(result["output"])
             except Exception:
                 return {"raw": result["output"]}
-        return {"error": result["error"]}
+        return {"error": result.get("error", "unknown")}
+
+    def get_wallet_portfolio(self) -> Dict:
+        """Full multi-chain portfolio via TWAK (USD values across chains)."""
+        result = self._twak_cmd(
+            ["twak", "wallet", "portfolio", "--json"], timeout=30)
+        if result["success"]:
+            try:
+                return json.loads(result["output"])
+            except Exception:
+                return {"raw": result["output"]}
+        return {"error": result.get("error", "unknown")}
 
     def get_status(self) -> Dict:
         return {
