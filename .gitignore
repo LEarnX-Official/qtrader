@@ -1,0 +1,31 @@
+# ── Secrets — NEVER commit ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.keystore
+*.mnemonic
+*secret*
+wallet.json
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ── Runtime data / logs (regenerated live) ──────────────────────────────────
+data/logs/
+*.log
+
+# ── Processed pipeline data (regenerated; not committed) ─────────────────────
+processed/
+
+# ── OS / editor ─────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/

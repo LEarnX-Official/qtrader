@@ -1,0 +1,29 @@
+# Core ML
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Web requests
+requests>=2.31.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Terminal UI
+rich>=13.0.0
+
+# Google Trends
+pytrends>=4.9.0
+
+# Web3 / BSC
+web3>=6.0.0
+
+# BNB Agent SDK (Special Prize #3)
+bnbagent[server]
+
+# BNB Agent server
+fastapi>=0.100.0
+uvicorn>=0.22.0
+
+# TWAK CLI — install separately:
+# curl -fsSL https://agent-kit.trustwallet.com/install.sh | bash
