@@ -18,9 +18,12 @@ venv/
 env/
 .ipynb_checkpoints/
 
-# ── Runtime data / logs (regenerated live) ──────────────────────────────────
+# ── Runtime data / logs (regenerated live every run) ────────────────────────
 data/logs/
 *.log
+data/raw/*.csv
+data/supplementary/*.csv
+results/trades_live.csv
 
 # ── Processed pipeline data (regenerated; not committed) ─────────────────────
 processed/
