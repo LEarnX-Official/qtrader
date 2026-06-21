@@ -522,6 +522,11 @@ Each special prize is $2,000 and stackable with a main placement.
 | Eligible tokens | 149 BEP-20 tokens on CMC (ETH, XRP, DOGE, LTC, INJ in our set) |
 | Competition contract | `0x212c61b9b72c95d95bf29cf032f5e5635629aed5` (BSC) |
 | Agent wallet | `0x4547C17BEF404a61767DB061df14Fad7581D9aB1` |
+| Registration tx (on-chain proof) | [`0x78b8e4b8…fceaf4`](https://bscscan.com/tx/0x78b8e4b8318a9d5f64e9920187111938920877ec8844ef5b2470d2c634fceaf4) (BSC) |
+
+> ✅ The agent is **registered on-chain** for the competition via TWAK
+> (`twak compete register`) — the transaction above is the immutable proof on
+> BscScan.
 
 > Returns are measured hourly; any hour starting with a portfolio worth ≤ $1
 > scores 0% for that hour — so capital stays deployed for the full window.
