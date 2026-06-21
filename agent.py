@@ -391,7 +391,10 @@ def main():
     print("qtrader — BNB Hack AI Trading Agent ⚡")
     print(f"Mode   : {'🔴 LIVE TRADE' if live else '📋 PAPER TRADE'}")
     print(f"Wallet : {AGENT_WALLET_ADDRESS}")
-    print(f"Capital: ${INITIAL_CAPITAL:,.0f}")
+    if live:
+        print(f"Capital: (detecting real on-chain balance…)")
+    else:
+        print(f"Capital: ${INITIAL_CAPITAL:,.0f} (paper)")
     print("="*60)
 
     # ── Load all components ───────────────────────────────────────────────────
@@ -418,8 +421,10 @@ def main():
         cooldown_cycles = 2,      # 8h cooldown after TP
     )
 
-    telegram.alert_startup(DRY_RUN, AGENT_WALLET_ADDRESS)
-    print("All components loaded.\n")
+    telegram.alert_startup(config.DRY_RUN, AGENT_WALLET_ADDRESS)
+    print("All components loaded.")
+    print(f"Capital in use: ${trader.capital:,.2f} "
+          f"{'(real on-chain balance)' if live else '(paper)'}\n")
 
     # ── Special commands ──────────────────────────────────────────────────────
     if args.status:
