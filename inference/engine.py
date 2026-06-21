@@ -13,7 +13,7 @@ import torch
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "quantum_trader"))
+# Phase packages (phase1-5) are bundled inside qtrader — fully standalone.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import (

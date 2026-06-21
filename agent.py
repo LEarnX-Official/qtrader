@@ -29,13 +29,13 @@ import numpy as np
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-QT_DIR   = BASE_DIR.parent / "quantum_trader"
-sys.path.insert(0, str(QT_DIR))
+# Phase packages (phase1-5) are bundled inside qtrader — fully standalone.
 sys.path.insert(0, str(BASE_DIR))
 
 from config import (
     DRY_RUN, CYCLE_HOURS, AGENT_WALLET_ADDRESS,
     INITIAL_CAPITAL, TRADE_TOKENS, ALL_TOKENS,
+    BASE_CURRENCY,
 )
 
 UTC = datetime.timezone.utc
@@ -225,12 +225,12 @@ def run_cycle(
         for t in trades:
             if t["action"] == "buy":
                 swap_result = twak.swap(
-                    from_token="USDT", to_token=t["token"],
+                    from_token=BASE_CURRENCY, to_token=t["token"],
                     amount_usd=t["amount_usd"],
                     capital=capital, peak_capital=trader.peak_capital)
             else:
                 swap_result = twak.swap(
-                    from_token=t["token"], to_token="USDT",
+                    from_token=t["token"], to_token=BASE_CURRENCY,
                     amount_usd=t["amount_usd"],
                     capital=capital, peak_capital=trader.peak_capital)
 

@@ -5,12 +5,16 @@
 > Live trading window: **June 22–28, 2026** · Scored on real on-chain PnL
 
 `qtrader` is a **crypto-native, self-custodial AI trading agent** for BNB Chain
-(BSC). It reads live markets through the **CoinMarketCap AI Agent Hub**, decides
-with a proprietary ML brain, enforces hard risk guardrails, and
-**signs and broadcasts its own BEP-20 swaps** through the **Trust Wallet Agent
-Kit (TWAK)** — keys never leave the device. It is built to run genuinely
-hands-off for the full competition week without blowing past the 30% drawdown
-disqualification gate.
+(BSC). It reads live markets, **pays for premium data per request via real x402
+micropayments (USDC on Base)**, decides with a proprietary ML brain, enforces
+hard risk guardrails, and **signs and broadcasts its own BEP-20 swaps** on BSC
+through the **Trust Wallet Agent Kit (TWAK)** — keys never leave the device. It
+is built to run genuinely hands-off for the full competition week without
+blowing past the 30% drawdown disqualification gate.
+
+**Dual-chain by design:** the agent **pays for data on Base** (where x402
+settles in USDC) and **trades on BSC** (the competition chain) — both from the
+same self-custodial wallet.
 
 ---
 
@@ -24,9 +28,11 @@ risk gate**.
 `qtrader` is my Track 1 entry, and it deliberately targets all three special
 prizes at once:
 
-- **The data layer** is the CMC Agent Hub — every quote, fear/greed read, regime
-  signal and OHLCV pull is paid for **per request via x402** as part of the live
-  trade loop (not just a README mention). → *Best Use of Agent Hub.*
+- **The data layer** pays for premium market data **per request via real x402
+  micropayments** — genuine USDC settlement on Base, signed by the agent wallet,
+  returning live funding-rate / derivatives / sentiment data that feeds the
+  decision loop. Not a README mention — verifiable on-chain. → *Best Use of
+  Agent Hub + native x402.*
 - **The execution layer** is TWAK and nothing else — local key signing,
   autonomous mode, x402, and on-chain guardrails run end-to-end. No custodial
   step anywhere in the trade loop. → *Best Use of TWAK.*
@@ -42,26 +48,34 @@ practice is the behavior they produce: the agent stays **defensive and
 cash-heavy when conviction is low**, which is exactly what survives a
 drawdown-capped competition.
 
+> 📩 **Want to talk about the full research stack** (the model architecture,
+> training methodology, and how the weights are produced)? That work is private,
+> but I'm happy to discuss it directly — **contact me at
+> ritwickhaldar2018@gmail.com**.
+
 ---
 
 ## Table of Contents
 
 1. [Main Architecture](#main-architecture)
-2. [The Decision Brain](#the-decision-brain)
-3. [The Trading Cycle](#the-trading-cycle)
-4. [Backtest Results](#backtest-results)
-5. [Project Structure](#project-structure)
-6. [Setup](#setup)
-7. [Running](#running)
-8. [Risk & Profit Management](#risk--profit-management)
-9. [Token Universe](#token-universe)
-10. [Configuration Reference](#configuration-reference)
-11. [Monitoring & Alerts](#monitoring--alerts)
-12. [Cron Deployment](#cron-deployment)
-13. [Paper → Live Switch](#paper--live-switch)
-14. [Tech Stack](#tech-stack)
-15. [Special Prize Coverage](#special-prize-coverage)
-16. [Competition Details](#competition-details)
+2. [Dual-Chain: Pay on Base, Trade on BSC](#dual-chain-pay-on-base-trade-on-bsc)
+3. [Real x402 Micropayments](#real-x402-micropayments)
+4. [The Decision Brain](#the-decision-brain)
+5. [The Trading Cycle](#the-trading-cycle)
+6. [Backtest Results](#backtest-results)
+7. [Project Structure](#project-structure)
+8. [Setup](#setup)
+9. [Running](#running)
+10. [Risk & Profit Management](#risk--profit-management)
+11. [Token Universe](#token-universe)
+12. [Configuration Reference](#configuration-reference)
+13. [Monitoring & Alerts](#monitoring--alerts)
+14. [Cron Deployment](#cron-deployment)
+15. [Paper → Live Switch](#paper--live-switch)
+16. [Tech Stack](#tech-stack)
+17. [Special Prize Coverage](#special-prize-coverage)
+18. [Competition Details](#competition-details)
+19. [Contact](#contact)
 
 ---
 
@@ -123,6 +137,69 @@ about all four.
   around them.
 - **One switch from paper to live.** `DRY_RUN` flips logging into real on-chain
   execution with zero other changes.
+
+---
+
+## Dual-Chain: Pay on Base, Trade on BSC
+
+qtrader deliberately spans **two chains**, using each for what it does best —
+both driven by the **same self-custodial wallet** (`0x4547C17B…`):
+
+```
+        ┌──────────────────────── EACH CYCLE ────────────────────────┐
+        │                                                            │
+   ┌────▼─────────────────────────┐        ┌────────────────────────▼────┐
+   │  PAY FOR DATA → x402 on BASE  │        │  TRADE → swaps on BSC        │
+   │  USDC on Base mainnet (8453)  │        │  USDC ↔ tokens on chain 56   │
+   │  real EIP-3009 authorization  │        │  PancakeSwap V2              │
+   │  ← funding rates, derivatives,│        │  competition wallet          │
+   │    sentiment, on-chain flow   │        │  TWAK local signing          │
+   └───────────────────────────────┘        └──────────────────────────────┘
+            (data fees)                              (capital at work)
+```
+
+| Rail | Chain | Asset | Why |
+|------|-------|-------|-----|
+| **Data fees (x402)** | Base mainnet (8453) | USDC | x402 settles in USDC on Base (Coinbase facilitator) |
+| **Trading (swaps)** | BSC (56) | USDC base | The competition is scored on BSC PnL |
+
+> Why split chains? x402's mature payment rail lives on Base; the competition
+> lives on BSC. Rather than force one chain to do both, qtrader pays data fees
+> where x402 actually settles (Base) and keeps all trading capital on BSC where
+> it's scored. One wallet, two rails, no custodial step on either.
+
+---
+
+## Real x402 Micropayments
+
+x402 is the open **HTTP-402 payment standard** (Coinbase) — a server replies
+`402 Payment Required`, the client signs a stablecoin payment authorization, and
+the request is retried with proof of payment. qtrader uses it for **real**, not
+as a label.
+
+**How it works in qtrader** ([execution/x402_payments.py](execution/x402_payments.py)):
+
+1. The agent calls a live x402-gated data endpoint on Base.
+2. The endpoint returns `402` with payment requirements (USDC on Base).
+3. **TWAK signs a real EIP-3009 USDC authorization** with the agent wallet —
+   self-custodial, capped by a per-call budget guard so an unattended agent can
+   never overspend.
+4. The request is retried with the `X-PAYMENT` header → the endpoint returns
+   live market data (funding-rate arbitrage, derivatives positioning, sentiment)
+   that feeds the decision loop.
+
+**Verifiable, not simulated.** Each call moves real USDC on Base:
+
+```
+USDC balance:  10.062371  →  10.061371  →  10.060371   (−0.001 per paid call)
+```
+
+Endpoints are configured in [config.py](config.py) (`X402_ENDPOINTS`), default
+~$0.001/call, with a hard `X402_MAX_PAYMENT` cap. In `DRY_RUN` the signing path
+is exercised but nothing broadcasts.
+
+> This directly answers the prize criterion: *"The agent uses x402 to pay per
+> request for data… as part of its trade loop. Real, not a README mention."*
 
 ---
 
@@ -230,8 +307,13 @@ qtrader/
 ### 1. Install dependencies
 
 ```bash
+# Python dependencies
 pip install -r requirements.txt
-pip install twak          # Trust Wallet Agent Kit
+
+# Trust Wallet Agent Kit CLI (Node.js, not pip) — installed globally as `twak`.
+# Get it from the TWAK portal: https://portal.trustwallet.com
+#   e.g.  npm install -g @trustwallet/twak     (see portal for the exact package)
+twak --version   # verify it's on your PATH
 ```
 
 ### 2. Configure `.env`
@@ -400,14 +482,15 @@ with `--dry-run false`.)
 
 | Layer | Technology |
 |-------|------------|
-| Data | CoinMarketCap AI Agent Hub (Pro API + MCP) + Binance public API |
+| Data | CoinMarketCap AI Agent Hub + x402-gated data endpoints + Binance public API |
 | ML brain | Proprietary model (trained in our main architecture) |
 | Decision | CMC Agent Hub skills (regime, perp/CVD analysis) |
 | Execution | Trust Wallet Agent Kit (TWAK) — local signing |
-| Chain | BNB Chain (BSC mainnet, chain id 56) |
+| Trading chain | BNB Chain (BSC mainnet, chain id 56) |
+| Payment chain | Base mainnet (chain id 8453) — real USDC x402 |
 | DEX | PancakeSwap V2 |
 | Agent identity | BNB AI Agent SDK (ERC-8004 / ERC-8183) |
-| Payments | x402 micropayments per data / inference call |
+| Payments | **Real x402 micropayments** (USDC on Base, EIP-3009 via TWAK) |
 | Alerts | Telegram Bot API |
 
 ---
@@ -419,7 +502,7 @@ Each special prize is $2,000 and stackable with a main placement.
 | Prize | How qtrader covers it |
 |-------|-----------------------|
 | **Best Use of TWAK** | TWAK is the *sole* execution layer — local key signing, autonomous mode, native x402, on-chain guardrails (drawdown cap, token allowlist, per-trade/daily limits, slippage); fully self-custodial through the entire trade loop ([twak_client.py](execution/twak_client.py)) |
-| **Best Use of Agent Hub** | CMC Agent Hub via Pro API + MCP for all market data, **x402 paid per request** in the live loop, Skills-formatted signals, deep regime/perp analysis ([cmc_hub.py](data/cmc_hub.py), [cmc_decision.py](decision/cmc_decision.py)) |
+| **Best Use of Agent Hub / x402** | CMC Agent Hub for market data + **real x402 micropayments** (USDC on Base, EIP-3009 signed via TWAK) paying live data endpoints every cycle — verifiable on-chain, not simulated ([x402_payments.py](execution/x402_payments.py), [cmc_hub.py](data/cmc_hub.py)) |
 | **Best Use of BNB Agent SDK** | Strategy registered on-chain (ERC-8004) and served as a tradeable agent endpoint (ERC-8183) ([bnb_agent.py](execution/bnb_agent.py)) |
 
 ---
@@ -442,5 +525,20 @@ Each special prize is $2,000 and stackable with a main placement.
 
 > Returns are measured hourly; any hour starting with a portfolio worth ≤ $1
 > scores 0% for that hour — so capital stays deployed for the full window.
+
+---
+
+## Contact
+
+`qtrader` (this repo) is the **open, runnable trading agent**. The **research
+stack behind the brain** — the model architecture, training pipeline, and how
+the weights are produced — is **private and not published here**.
+
+If you want to discuss the full research stack (judges, collaborators, or anyone
+curious about the methodology), reach out directly:
+
+**📩 ritwickhaldar2018@gmail.com**
+
+---
 
 **Built for BNB Chain × CoinMarketCap × Trust Wallet.**

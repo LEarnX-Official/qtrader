@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import (
     TWAK_API_KEY, AGENT_WALLET_ADDRESS, WALLET_PASSWORD,
-    TOKEN_ADDRESSES, USDT_ADDRESS, TRADE_TOKENS,
+    TOKEN_ADDRESSES, BASE_CURRENCY, BASE_ADDRESS, TRADE_TOKENS,
     BSC_RPC_URL, BSC_CHAIN_ID, PANCAKESWAP_ROUTER,
     COMPETITION_CONTRACT, DRY_RUN, RESULTS_DIR,
     INITIAL_CAPITAL, TRANSACTION_COST, SLIPPAGE,
@@ -36,7 +36,7 @@ class TWAKTrader:
     def __init__(self):
         self.dry_run        = DRY_RUN
         self.capital        = INITIAL_CAPITAL
-        self.holdings       = {"USDT": INITIAL_CAPITAL}  # token → USD value
+        self.holdings       = {BASE_CURRENCY: INITIAL_CAPITAL}  # token → USD value
         self.weights        = np.zeros(7, dtype=np.float32)
         self.cash_weight    = 1.0
         self.trade_history  = []
@@ -77,7 +77,7 @@ class TWAKTrader:
 
     def portfolio_value(self, prices: Dict[str, float]) -> float:
         """Calculate current total portfolio value in USD."""
-        total = self.holdings.get("USDT", 0.0)
+        total = self.holdings.get(BASE_CURRENCY, 0.0)
         for token, price in prices.items():
             if token in self.holdings and price > 0:
                 total += self.holdings[token] * price
@@ -96,7 +96,7 @@ class TWAKTrader:
         Convert portfolio weights to target token holdings.
         Returns dict: token → amount in tokens (not USD)
         """
-        targets = {"USDT": capital * cash_w}
+        targets = {BASE_CURRENCY: capital * cash_w}
         for i, token in enumerate(TRADE_TOKENS):
             usd_value = capital * float(weights[i])
             if prices.get(token, 0) > 0:
@@ -149,21 +149,21 @@ class TWAKTrader:
                 return None
 
             if trade["action"] == "buy":
-                # USDT → Token
+                # BASE_CURRENCY → Token
                 cmd = [
                     "twak", "swap",
-                    "--from", USDT_ADDRESS,
+                    "--from", BASE_ADDRESS,
                     "--to",   token_addr,
                     "--amount", str(round(trade["amount_usd"], 2)),
                     "--slippage", "0.5",
                     "--wallet", AGENT_WALLET_ADDRESS,
                 ]
             else:
-                # Token → USDT
+                # Token → BASE_CURRENCY
                 cmd = [
                     "twak", "swap",
                     "--from", token_addr,
-                    "--to",   USDT_ADDRESS,
+                    "--to",   BASE_ADDRESS,
                     "--amount", str(round(trade["amount_token"], 6)),
                     "--slippage", "0.5",
                     "--wallet", AGENT_WALLET_ADDRESS,
@@ -224,7 +224,7 @@ class TWAKTrader:
                       f"(cost: ${cost:.2f})")
             # Update simulated holdings
             self.holdings = {
-                "USDT": old_capital * cash_w,
+                BASE_CURRENCY: old_capital * cash_w,
             }
             for i, token in enumerate(TRADE_TOKENS):
                 usd_val = old_capital * float(weights[i])
@@ -240,13 +240,13 @@ class TWAKTrader:
                     if t["action"] == "buy":
                         self.holdings[t["token"]] = (
                             self.holdings.get(t["token"], 0) + t["amount_token"])
-                        self.holdings["USDT"] = (
-                            self.holdings.get("USDT", 0) - t["amount_usd"])
+                        self.holdings[BASE_CURRENCY] = (
+                            self.holdings.get(BASE_CURRENCY, 0) - t["amount_usd"])
                     else:
                         self.holdings[t["token"]] = max(
                             0, self.holdings.get(t["token"], 0) - t["amount_token"])
-                        self.holdings["USDT"] = (
-                            self.holdings.get("USDT", 0) + t["amount_usd"])
+                        self.holdings[BASE_CURRENCY] = (
+                            self.holdings.get(BASE_CURRENCY, 0) + t["amount_usd"])
 
         # Update state
         self.weights     = weights.copy()

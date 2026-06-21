@@ -23,7 +23,6 @@ ASTER_USER_ADDRESS   = os.getenv("ASTER_USER_ADDRESS", "")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).resolve().parent
-QT_DIR          = BASE_DIR.parent / "quantum_trader"   # main architecture (model class defs)
 MODELS_DIR      = BASE_DIR / "data" / "models"         # trained weights bundled in qtrader
 DATA_DIR        = BASE_DIR / "data"
 RAW_DIR         = DATA_DIR / "raw"
@@ -56,8 +55,15 @@ TOKEN_ADDRESSES = {
     "INJ":  "0xa2B726B1145A4773F68593CF171187d8EBe4d495",  # INJ BEP-20
     "SOL":  "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",  # SOL BEP-20
     "USDT": "0x55d398326f99059fF775485246999027B3197955",  # USDT BEP-20
+    "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",  # USDC BEP-20
 }
 USDT_ADDRESS = TOKEN_ADDRESSES["USDT"]
+USDC_ADDRESS = TOKEN_ADDRESSES["USDC"]
+
+# ── Base / quote currency the agent holds cash in and swaps against ───────────
+# Wallet holds USDC, so trade against USDC. Switch to "USDT" to revert.
+BASE_CURRENCY = "USDC"
+BASE_ADDRESS  = TOKEN_ADDRESSES[BASE_CURRENCY]
 
 # ── Trading Parameters ────────────────────────────────────────────────────────
 INITIAL_CAPITAL      = 100.0       # USD (paper trade) / real USDT (live)
@@ -95,12 +101,23 @@ CMC_HEADERS          = {
 }
 
 # ── x402 Micropayment Protocol ────────────────────────────────────────────────
-X402_ENABLED         = True       # Pay per CMC Agent Hub request via TWAK
+# x402 settles in USDC on Base mainnet (Coinbase facilitator). Real payments
+# are made via TWAK (`twak x402 request`) against live x402-gated endpoints.
+X402_ENABLED         = True       # Pay per data request via TWAK x402 on Base
+X402_NETWORK         = "base"     # x402 settlement chain (Base mainnet, 8453)
+X402_MAX_PAYMENT     = 5000       # atomic USDC cap per call (5000 = 0.005 USDC)
 X402_COST_PER_CALL   = 0.001      # $0.001 per data request
-X402_COST_OHLCV      = 0.001      # per OHLCV fetch
-X402_COST_QUOTES     = 0.001      # per quotes fetch
-X402_COST_FEAR_GREED = 0.0005     # per fear/greed fetch
-X402_COST_GLOBAL     = 0.0005     # per global metrics fetch
+
+# Live x402-gated endpoints (Base mainnet, USDC) — verified payable.
+# These return real market/derivatives data in exchange for a micropayment,
+# used to enrich the agent's supplementary signals each cycle.
+X402_ENDPOINTS = {
+    "funding_rates":     "https://x402.ottoai.services/funding-rates",
+    "trending_altcoins": "https://x402.ottoai.services/trending-altcoins",
+    "defi_analytics":    "https://x402.ottoai.services/defi-analytics",
+    "kol_sentiment":     "https://x402.ottoai.services/kol-sentiment",
+}
+X402_PRIMARY_ENDPOINT = X402_ENDPOINTS["funding_rates"]
 
 # ── BNB Agent SDK ─────────────────────────────────────────────────────────────
 BNB_AGENT_NETWORK    = "bsc-mainnet"

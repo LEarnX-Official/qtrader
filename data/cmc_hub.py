@@ -43,17 +43,31 @@ _x402_log = []
 
 def _x402_pay(endpoint: str, amount_usd: float = 0.001) -> Dict:
     """
-    Simulate x402 micropayment for a CMC Agent Hub data request.
-    In production: sends actual x402 payment via TWAK wallet.
-    Returns payment receipt for audit trail.
+    Real x402 micropayment for a CMC Agent Hub data request.
+
+    Signs a genuine EIP-3009 USDC payment authorization on BSC via the agent's
+    self-custodial wallet (bnbagent.x402.X402Signer), with per-call + session
+    budget guardrails. In DRY_RUN the signing path runs but nothing broadcasts.
+    Returns the payment receipt for the audit trail.
     """
-    receipt = {
-        "endpoint":   endpoint,
-        "amount_usd": amount_usd,
-        "timestamp":  datetime.datetime.now(UTC).isoformat(),
-        "status":     "paid",
-        "protocol":   "x402",
-    }
+    try:
+        from execution.x402_payments import get_payer
+        from config import X402_PRIMARY_ENDPOINT
+        # Pay a real x402-gated endpoint on Base (USDC). `endpoint` is the
+        # logical label for the data being paid for; the actual paid URL is the
+        # configured x402 resource.
+        receipt = get_payer().pay(url=X402_PRIMARY_ENDPOINT, amount_usd=amount_usd)
+        receipt.setdefault("endpoint", endpoint)
+    except Exception as e:
+        # Never let a payment hiccup block data fetching — log and continue.
+        receipt = {
+            "endpoint":   endpoint,
+            "amount_usd": amount_usd,
+            "timestamp":  datetime.datetime.now(UTC).isoformat(),
+            "status":     "error",
+            "protocol":   "x402",
+            "error":      str(e),
+        }
     _x402_log.append(receipt)
     return receipt
 

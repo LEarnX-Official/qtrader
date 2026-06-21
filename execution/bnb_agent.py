@@ -70,11 +70,13 @@ class QuantumTraderBNBAgent:
             return
 
         try:
-            # Set wallet address env var so SDK picks the right wallet
+            # Pass the wallet address explicitly so the SDK picks the right one
+            # when multiple wallets exist in ~/.bnbagent/wallets.
             os.environ["WALLET_ADDRESS"] = AGENT_WALLET_ADDRESS
             self.wallet = EVMWalletProvider(
                 password=WALLET_PASSWORD,
-                private_key=os.getenv("PRIVATE_KEY", ""),
+                private_key=os.getenv("PRIVATE_KEY", "") or None,
+                address=AGENT_WALLET_ADDRESS,
             )
             self.sdk = ERC8004Agent(
                 network="bsc-mainnet",
@@ -151,7 +153,7 @@ class QuantumTraderBNBAgent:
         port = port or self.SERVICE_PORT
 
         # Import inference engine here to avoid circular imports
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "quantum_trader"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from inference.engine import QuantumTraderEngine, load_live_data
 
         engine = QuantumTraderEngine()

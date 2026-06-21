@@ -287,7 +287,9 @@ class TWAKClient:
         Autonomous mode: no human approval required per transaction.
         """
         # ── Guardrail check before ANY transaction ────────────────────────────
-        check_token = to_token if from_token == "USDT" else from_token
+        # The traded token is whichever side is NOT the cash/base currency.
+        _STABLES = {"USDT", "USDC"}
+        check_token = to_token if from_token in _STABLES else from_token
         allowed, reason = self.guardrails.check_trade(
             token=check_token, amount_usd=amount_usd,
             capital=capital, peak_capital=peak_capital)
