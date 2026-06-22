@@ -36,6 +36,7 @@ class TWAKTrader:
     def __init__(self):
         self.dry_run        = DRY_RUN
         self.capital        = INITIAL_CAPITAL
+        self.start_capital  = INITIAL_CAPITAL   # real baseline (synced on-chain in live)
         self.holdings       = {BASE_CURRENCY: INITIAL_CAPITAL}  # token → USD value
         self.weights        = np.zeros(7, dtype=np.float32)
         self.cash_weight    = 1.0
@@ -96,6 +97,9 @@ class TWAKTrader:
             self.holdings     = holdings
             self.capital      = total_usd
             self.peak_capital = total_usd
+            # Record the REAL starting capital so returns are measured against
+            # what was actually funded on-chain, not the config INITIAL_CAPITAL.
+            self.start_capital = total_usd
             usdc = holdings.get(BASE_CURRENCY, 0.0)
             print(f"[Trader] 💰 Live balance detected: ${total_usd:,.2f} "
                   f"({BASE_CURRENCY}=${usdc:,.2f} + tokens)")

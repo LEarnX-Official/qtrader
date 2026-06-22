@@ -267,7 +267,8 @@ def run_cycle(
 
         port_ret = (new_capital - capital) / max(capital, 1e-8)
         trader.port_returns.append(port_ret)
-        total_return = (new_capital - INITIAL_CAPITAL) / INITIAL_CAPITAL
+        base = trader.start_capital or INITIAL_CAPITAL
+        total_return = (new_capital - base) / base
 
         # Save trade record
         trader._save_trade({
@@ -300,7 +301,7 @@ def run_cycle(
         weights      = adj_weights,
         cash_w       = adj_cash,
         capital      = trader.capital,
-        total_return = (trader.capital - INITIAL_CAPITAL) / INITIAL_CAPITAL,
+        total_return = (trader.capital - (trader.start_capital or INITIAL_CAPITAL)) / (trader.start_capital or INITIAL_CAPITAL),
         reason       = reason,
         tx_hashes    = tx_hashes,
     )
@@ -311,7 +312,7 @@ def run_cycle(
         summary = trader.get_portfolio_summary()
         telegram.alert_daily_summary(
             capital      = trader.capital,
-            total_return = (trader.capital - INITIAL_CAPITAL) / INITIAL_CAPITAL,
+            total_return = (trader.capital - (trader.start_capital or INITIAL_CAPITAL)) / (trader.start_capital or INITIAL_CAPITAL),
             max_dd       = float(summary["max_drawdown"].strip("%")) / 100,
             n_trades     = risk.trades_today(),
             weights      = adj_weights,
@@ -492,7 +493,7 @@ def main():
                             weights      = adj_w,
                             cash_w       = adj_cash,
                             capital      = trade_result["capital"],
-                            total_return = (trade_result["capital"] - INITIAL_CAPITAL) / INITIAL_CAPITAL,
+                            total_return = (trade_result["capital"] - (trader.start_capital or INITIAL_CAPITAL)) / (trader.start_capital or INITIAL_CAPITAL),
                             reason       = f"profit_manager: {list(tp_actions.values())}",
                             tx_hashes    = [],
                         )
