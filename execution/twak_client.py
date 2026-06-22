@@ -211,19 +211,26 @@ class TWAKClient:
         except Exception as e:
             print(f"  [TWAK] Init error: {e}")
 
-    def _twak_cmd(self, cmd: List[str], timeout: int = 60) -> Dict:
-        """Run a TWAK CLI command. Returns {success, output, error}."""
+    def _twak_cmd(self, cmd: List[str], timeout: int = 60,
+                  password: Optional[str] = None) -> Dict:
+        """Run a TWAK CLI command. Returns {success, output, error}.
+
+        Most TWAK commands read the wallet password from TWAK_WALLET_PASSWORD
+        (set in env below). `twak swap` is the exception — it REQUIRES the
+        explicit --password flag to execute, so callers that need to sign a
+        swap pass `password=...` and it is appended here (never logged)."""
         try:
             env = os.environ.copy()
             env["TWAK_API_KEY"]          = TWAK_API_KEY
-            # TWAK reads the wallet password from TWAK_WALLET_PASSWORD (per CLI
-            # help). Passing it via env keeps it OUT of the process arg list
-            # (ps aux), unlike a --password flag.
             env["TWAK_WALLET_PASSWORD"]  = WALLET_PASSWORD
             env["TWAK_WALLET"]           = AGENT_WALLET_ADDRESS
 
+            run_cmd = list(cmd)
+            if password:
+                run_cmd += ["--password", password]
+
             result = subprocess.run(
-                cmd, capture_output=True, text=True,
+                run_cmd, capture_output=True, text=True,
                 timeout=timeout, env=env)
 
             return {
@@ -320,27 +327,72 @@ class TWAKClient:
             return result
 
         # ── Live swap via TWAK local signing ──────────────────────────────────
-        # Syntax: twak swap --usd <amount> <from_token> <to_token>
+        # Syntax: twak swap --usd <amount> <from> <to> --password <pw>
+        # NOTE: the CLI REQUIRES --password to execute; the env var alone only
+        # returns a quote. We pass it through _twak_cmd's password channel so it
+        # never appears in our own logs.
         slippage_pct = str(round(self.guardrails.slippage_tolerance * 100, 1))
 
-        result = self._twak_cmd([
+        # Resolve symbols to BEP-20 CONTRACT ADDRESSES. TWAK's CLI registry does
+        # not know every symbol (e.g. "DOGE" silently routes to BNB!), so we
+        # always pass the explicit contract from config to guarantee correct
+        # routing. Falls back to the bare symbol only if we have no address.
+        from_id = TOKEN_ADDRESSES.get(from_token, from_token)
+        to_id   = TOKEN_ADDRESSES.get(to_token,   to_token)
+
+        # When SELLING a non-stable token, a --usd amount can round to slightly
+        # MORE token than the wallet holds → execution reverts (0xf4059071).
+        # If the requested USD is at/above the held value, sell the EXACT token
+        # balance instead of a USD figure (clean full exit).
+        amount_args = ["--usd", str(round(amount_usd, 2)), from_id, to_id]
+        if from_token not in _STABLES:
+            tok_bal, tok_usd = self._token_balance(from_token)
+            if tok_bal > 0 and (tok_usd <= 0 or amount_usd >= tok_usd * 0.98):
+                # full / near-full exit → sell exact units we own. Shave a hair
+                # off so rounding never requests more than the on-chain balance
+                # (the cause of 'BEP20: transfer amount exceeds balance').
+                sell_units = tok_bal * 0.999
+                amount_args = [self._fmt_amount(sell_units), from_id, to_id]
+                print(f"  [TWAK LIVE] Full exit of {from_token}: "
+                      f"selling {amount_args[0]} units (bal-based, not --usd)")
+
+        cmd = [
             "twak", "swap",
-            "--usd",      str(round(amount_usd, 2)),
-            from_token,
-            to_token,
+            *amount_args,
             "--chain",    "bsc",
             "--slippage", slippage_pct,
             "--json",
-        ], timeout=90)  # password supplied via TWAK_WALLET_PASSWORD env (not argv)
+        ]
 
-        if result["success"]:
-            try:
-                out = json.loads(result["output"])
-            except Exception:
-                out = {}
+        # First time a token is swapped, TWAK must send an ERC-20 approval before
+        # the swap. If the approval is not yet mined the swap reverts. We retry
+        # with an escalating wait so a slow-to-confirm approval still goes
+        # through autonomously. Revert 0xf4059071 = router using a not-yet-mined
+        # allowance, so it is retryable too.
+        APPROVAL_WAITS = [20, 30, 45]   # seconds before each retry
+        result = self._twak_cmd(cmd, timeout=120, password=WALLET_PASSWORD)
+        out    = self._parse_swap_output(result)
 
-            tx_hash  = out.get("txHash", result["output"].strip())
-            bsc_scan = f"https://bscscan.com/tx/{tx_hash}"
+        for wait in APPROVAL_WAITS:
+            err_code = out.get("errorCode", "")
+            err_msg  = (out.get("error") or "")
+            needs_approval = (
+                err_code == "APPROVAL_SENT_SWAP_FAILED"
+                or "0xf4059071" in err_msg
+                or "allowance" in err_msg.lower()
+            )
+            if not needs_approval:
+                break
+            print(f"  [TWAK LIVE] Approval for {from_token} pending; "
+                  f"waiting {wait}s for confirmation, then retrying swap...")
+            time.sleep(wait)
+            result = self._twak_cmd(cmd, timeout=120, password=WALLET_PASSWORD)
+            out    = self._parse_swap_output(result)
+
+        tx_hash = out.get("hash") or out.get("txHash")
+
+        if result["success"] and tx_hash:
+            bsc_scan = out.get("explorer", f"https://bscscan.com/tx/{tx_hash}")
 
             self.guardrails.record_trade()
             print(f"  [TWAK LIVE] {from_token}→{to_token} ${amount_usd:.2f} | "
@@ -357,8 +409,63 @@ class TWAKClient:
                 "timestamp":  datetime.datetime.now(UTC).isoformat(),
             }
         else:
-            print(f"  [TWAK LIVE] Swap failed: {result['error']}")
-            return {"success": False, "error": result["error"]}
+            err = out.get("error") or result.get("error") or "unknown error"
+            print(f"  [TWAK LIVE] Swap failed: {err}")
+            return {"success": False, "error": err}
+
+    # Minimal ERC-20 ABI for an on-chain balance read.
+    _ERC20_ABI = [
+        {"constant": True, "inputs": [{"name": "a", "type": "address"}],
+         "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}],
+         "type": "function"},
+        {"constant": True, "inputs": [], "name": "decimals",
+         "outputs": [{"name": "", "type": "uint8"}], "type": "function"},
+    ]
+
+    def _token_balance(self, token: str) -> Tuple[float, float]:
+        """Return (token_units, usd_value) held on BSC.
+
+        Reads the ERC-20 balance DIRECTLY on-chain via RPC using the token's
+        contract address from config. This is the source of truth — TWAK's
+        `wallet balance` does NOT list every token (e.g. DOGE), which would
+        otherwise make a full-exit sell revert with 'transfer exceeds balance'.
+        usd is returned as 0 (callers treat 0 as 'sell exact units')."""
+        addr = TOKEN_ADDRESSES.get(token)
+        if not addr:
+            return 0.0, 0.0
+        try:
+            from web3 import Web3
+            w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
+            c  = w3.eth.contract(
+                address=Web3.to_checksum_address(addr), abi=self._ERC20_ABI)
+            wallet = Web3.to_checksum_address(AGENT_WALLET_ADDRESS)
+            raw = c.functions.balanceOf(wallet).call()
+            dec = c.functions.decimals().call()
+            return raw / (10 ** dec), 0.0
+        except Exception as e:
+            print(f"  [TWAK] on-chain balance read failed for {token}: {e}")
+            return 0.0, 0.0
+
+    @staticmethod
+    def _fmt_amount(units: float) -> str:
+        """Format a token amount for the CLI without scientific notation,
+        trimming trailing zeros. Floor-truncate so we never request more than
+        we hold."""
+        s = f"{units:.18f}".rstrip("0").rstrip(".")
+        return s if s else "0"
+
+    @staticmethod
+    def _parse_swap_output(result: Dict) -> Dict:
+        """Parse a `twak swap` JSON result; the CLI prints a banner line before
+        the JSON, so scan for the first '{' rather than json.loads-ing the lot."""
+        raw = result.get("output", "") or ""
+        i   = raw.find("{")
+        if i == -1:
+            return {}
+        try:
+            return json.loads(raw[i:])
+        except Exception:
+            return {}
 
     # ── Competition Registration ───────────────────────────────────────────────
 
